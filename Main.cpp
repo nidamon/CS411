@@ -334,18 +334,6 @@ public:
 		return abs(a * point->_position.x + b * point->_position.y + c) /
 			sqrtf(a * a + b * b);
 	}
-	/*void splitPoints(const Point* A, const Point* B, std::vector<Point>& points, std::vector<Point*>& pointsAbove, std::vector<Point*>& pointsBelow)
-	{
-		for (auto& point : points)
-		{
-			if (point.isOnHull())
-				continue;
-			if (isAboveline(*A, *B, point))
-				pointsAbove.push_back(&point);
-			else
-				pointsBelow.push_back(&point);
-		}
-	}*/
 	// Returns the split point (index of the last element of the )
 	void splitPoints(Point* A, Point* B, Point* C, const std::vector<Point*>& pointsSource, const int rangeStart, const int rangeEnd, std::vector<Point*>& pointsDestination, int& lastACIndex, int& firstCBIndex)
 	{
