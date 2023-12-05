@@ -122,12 +122,12 @@ public:
 		void printData()
 		{
 			printCards(_discardedCards, false, 20);
-			cout << " E[x]: " << _expectedReturn << endl;
+			cout << " E[x]: $" << _expectedReturn << endl;
 		}
 	};
 	struct HandTable
 	{
-		vector<vector<Stat>> _handStats;
+		vector<vector<Stat>> _handStats = vector<vector<Stat>>(8, vector<Stat>(static_cast<int>(Hand::EmptyHand)));
 
 		void setup()
 		{
@@ -155,17 +155,29 @@ public:
 		// Adds up the frequencies and then sets the probability and expected payout for each hand
 		void finalizeData()
 		{
-			int tempCounter = 0;
-			for (auto& column : _handStats)
+			float divisor = 1.0f;
+			for (size_t i = 0; i < _handStats.size(); i++)
 			{
-				for (auto& stat : column)
-					tempCounter += stat._frequency;
-				for (auto& stat : column)
+				// Divisor for each of the 8 holds
+				if (i == 1)
+					divisor *= 49.0f;
+				else if (i == 4)
+					divisor *= 24.0f; // (48 / 2) Combinations: 49 choose 2 (49 * 48 / 2)
+				else if (i == 7)
+					divisor *= 47.0f / 3.0f; // Combinations: 49 choose 3 (49 * 48 * 47 / (2 * 3))
+				else
 				{
-					stat._probability = float(stat._frequency) / float(tempCounter);
+					// Nothing
+				}
+					
+				// Set the expected payouts
+				for (auto& stat : _handStats[i])
+				{
+					if (stat._frequency == 0)
+						continue;
+					stat._probability = float(stat._frequency) / divisor;
 					stat._expectedPayout = float(stat._payout) * stat._probability;
 				}
-				tempCounter = 0;
 			}
 		}
 		// Returns an index to the best column and its expected return
@@ -186,11 +198,27 @@ public:
 			}
 			return std::make_pair(bestIndex, bestExpectedReturn);
 		}
+		void addColumnToColumn(int columnIndex, vector<Stat>& columnDestination)
+		{
+			for (size_t i = 0; i < _handStats[columnIndex].size(); i++)
+				columnDestination[i]._expectedPayout += _handStats[columnIndex][i]._expectedPayout;
+		}
+		void printExpectedValuePerColumn()
+		{
+			for (size_t i = 0; i < _handStats.size(); i++)
+			{
+				float expectedReturn = 0.0f;
+				for (auto& stat : _handStats[i])
+					expectedReturn += stat._expectedPayout;
+				cout << "Column #" << i << ": " << expectedReturn << endl;
+			}
+		}
 	};
 public:
 	PokerProbability()
 	{
 		_deck = getDeck();
+		_handStatsTable.setup();
 	}
 	~PokerProbability()
 	{
@@ -292,45 +320,6 @@ public:
 		return 1;
 	}
 	// Returns true when given cards make a sequence
-	static bool isStraightDeprecated(vector<Card> cards)
-	{
-		if (cards.empty())
-			return false;
-
-		sortCards(cards, true);
-		
-		// Wrap check
-		bool wraps = false;
-		if (cards[0]._rank == Rank::_Ace && cards.back()._rank == Rank::_King)
-			wraps = true;
-
-		auto previousVal = static_cast<int>(cards[0]._rank);
-		for (size_t i = 1; i < cards.size(); i++)
-		{
-			auto currentVal = static_cast<int>(cards[i]._rank);
-
-			// Don't include KA2
-			if (wraps && currentVal == static_cast<int>(Rank::_2))
-				return false;
-
-			// Cards are in order ascending 1 rank at a time
-			if (previousVal != currentVal - 1)
-			{
-				// Wrap arround (check again, but only once)
-				if (wraps)
-				{
-					previousVal = currentVal;
-					wraps = false;
-					continue;
-				}
-				
-				return false;
-			}
-			previousVal = currentVal;
-		}
-
-		return true;
-	}
 	static bool isStraight(vector<Card>& cards)
 	{
 		if (cards.empty())
@@ -386,361 +375,16 @@ public:
 		return Hand::High_Card;
 	}
 
-	void generateCardCombinations(int handSize = 3)
+	void printStatistcs(bool withDraws)
 	{
-		if (handSize < 1 || handSize > 52)
-		{
-			cout << "Invalid input for generateCardCombinations(). Input must be between 1 and 52 inclusive. Given input was " << handSize << endl;
-			return;
-		}
+		generateCardCombinations();
+		generateStatistics(withDraws);
 
-		_allCardCombinations = runDC_Combinations(handSize);
-	}
-	void generateStatisticsNoDraws()
-	{
-		setupStatistics(_statistics);
-
-		// Check all hands and get frequencies
-		for (auto& hand : _allCardCombinations)
-			_statistics[static_cast<int>(checkHand(hand))]._frequency++;
-
-
-		// #######################################
-		// Finalize statistics
-		// #######################################
-		
-		auto computeStat = [&](Hand hand, string description) {
-			Stat& statRef = _statistics[static_cast<int>(hand)];
-			statRef._description = description;
-
-			statRef._probability = float(statRef._frequency) / float(_allCardCombinations.size());			
-			statRef._expectedPayout = float(statRef._payout) * statRef._probability;
-			};
-
-		computeStat(Hand::Royal_FLush, "AKQ (in any suit)");
-		computeStat(Hand::Straight_Flush, "3 suited in sequence");
-		computeStat(Hand::Three_Aces, "3 Aces (any combo of suits)");
-		computeStat(Hand::Three_of_a_Kind, "3 of the same rank");
-		computeStat(Hand::Straight, "3 in sequence (includes AKQ)");
-		computeStat(Hand::Flush, "3 suited");
-		computeStat(Hand::Pair, "2 of the same rank");
-		computeStat(Hand::High_Card, "None of the above");
-	}
-	void generateStatisticsWithDraws(bool storeLast4InterestingHands = false)
-	{		
-		setupStatistics(_statistics);
-
-		cout << "Adjust generateStatisticsWithDraws code" << endl;
-		//cout << "Generating statistics...";
-		//int incrementOfInform = 1; // Percent increment dispayed while running
-		//int countPerIncrementOfInform = _allCardCombinations.size() / (100 / incrementOfInform);
-		//int currentPercent = 0;
-		//cout << "Count per percent: " << countPerIncrementOfInform << endl;
-
-		//// Check all hands and add expected values
-		//for (size_t i = 0; i < _allCardCombinations.size(); i++)
-		//{
-		//	// Display percent progress
-		//	if (i > countPerIncrementOfInform * currentPercent)
-		//	{
-		//		cout << incrementOfInform * currentPercent << "% ";
-		//		currentPercent++;
-		//	}
-		//	//cout << i << " ";
-
-		//	auto tempValue = getOptimalExpectedValueOfDraws(_allCardCombinations[i], storeLast4InterestingHands);
-		//	auto tempHand = checkHand(_allCardCombinations[i]);
-
-		//	_statistics[static_cast<int>(tempHand)]._expectedPayout += tempValue;
-		//	_statistics[static_cast<int>(tempHand)]._frequency++;
-		//}
-		//cout << "100% \nComplete" << endl;
-
-		//
-		//// #######################################
-		//// Finalize statistics
-		//// #######################################
-
-		//// Adds the description and payout
-		//auto setupStat = [&](Hand hand, string description) {
-		//	Stat& statRef = _statistics[static_cast<int>(hand)];
-		//	statRef._description = description;
-
-		//	if(statRef._frequency != 0)
-		//		statRef._expectedPayout /= float(_allCardCombinations.size());
-		//	};
-
-		//setupStat(Hand::Royal_FLush, "AKQ (in any suit)");
-		//setupStat(Hand::Straight_Flush, "3 suited in sequence");
-		//setupStat(Hand::Three_Aces, "3 Aces (any combo of suits)");
-		//setupStat(Hand::Three_of_a_Kind, "3 of the same rank");
-		//setupStat(Hand::Straight, "3 in sequence (includes AKQ)");
-		//setupStat(Hand::Flush, "3 suited");
-		//setupStat(Hand::Pair, "2 of the same rank");
-		//setupStat(Hand::High_Card, "None of the above");
+		printTable(_statistics, !withDraws);
 	}
 
-	void printTable(bool includeProbabilityAndFrequency = true)
-	{
-		std::ostringstream out;
-
-		// Categories
-		out << left << setw(16) << "Hand";
-		out << left << setw(30) << "Description";
-		if (includeProbabilityAndFrequency)
-		{
-			out << left << setw(7) << "Freq";
-			out << left << setw(13) << "Probability";
-		}
-		out << left << setw(8) << "Payout";
-		out << left << setw(9) << "Return";
-		out << endl;
-
-		int tableBorderSize = 83;
-		if (includeProbabilityAndFrequency == false)
-			tableBorderSize = 83 - 20;
-
-		// Border
-		out << setw(tableBorderSize) << std::setfill('-') << "-" << endl;
-
-		float totalReturnInDollars = 0.0f;
-		for (auto& stat : _statistics)
-		{
-			out << stat.getFormatted(includeProbabilityAndFrequency);
-			totalReturnInDollars += stat._expectedPayout;
-		}
-
-		// Border
-		out << setw(tableBorderSize) << std::setfill('-') << "-" << endl;
-
-		// Return
-		out << std::setfill(' ');
-		out << std::right << setw(tableBorderSize - 9) << "Total Return: ";
-		out << left << setw(7) << Stat::formatMoney(totalReturnInDollars);
-
-		// Print to console
-		cout << out.str();
-	}
-
-	static void setupStatistics(vector<Stat>& stats)
-	{
-		// Clear and set
-		stats = vector<Stat>(static_cast<int>(Hand::EmptyHand));
-
-		for (size_t i = 0; i < stats.size(); i++)
-		{
-			stats[i]._hand = static_cast<Hand>(i);
-			stats[i]._frequency = 0;
-			stats[i]._payout = getHandPayout(static_cast<Hand>(i));
-		}
-	}
-	vector<DiscardAndReturn> getExpectedValuesOfDrawsNoTable(vector<Card>& heldCards)
-	{
-		//vector<DiscardAndReturn> expectedReturns;
-		//// Draw 0
-		//expectedReturns.push_back(DiscardAndReturn({}, getHandPayout(checkHand(heldCards))));
-
-		//// Get cards in deck minus the ones that are held
-		//auto remainingCards = _deck;
-		//for (auto& heldCard : heldCards)
-		//	remainingCards.erase(std::find(remainingCards.begin(), remainingCards.end(), heldCard));
-
-		//// Draw 1
-		//{
-		//	Card droppedCard;
-		//	for (size_t i = 0; i < heldCards.size(); i++)
-		//	{
-		//		droppedCard = heldCards[i];
-		//		auto changedHand = heldCards;
-		//		changedHand.erase(std::find(changedHand.begin(), changedHand.end(), droppedCard));
-
-		//		int sumOfPayouts = 0;
-
-		//		for (size_t j = 0; j < remainingCards.size(); j++)
-		//		{
-		//			// Check for removed cards
-		//			if (remainingCards[j] == droppedCard)
-		//				continue;
-
-		//			changedHand.push_back(remainingCards[j]);
-		//			sumOfPayouts += getHandPayout(checkHand(changedHand));
-		//			changedHand.pop_back();
-		//		}
-
-		//		expectedReturns.push_back(DiscardAndReturn({ droppedCard }, float(sumOfPayouts) / float(remainingCards.size())));
-		//	}
-		//}
-
-		//// Draw 2
-		//{
-		//	Card droppedCard1;
-		//	Card droppedCard2;
-		//	for (size_t i = 0; i < heldCards.size(); i++)
-		//	{
-		//		droppedCard1 = heldCards[i];
-		//		droppedCard2 = heldCards[(i + 1) % heldCards.size()];
-
-		//		vector<Card> changedHand = { heldCards[(i + 2) % heldCards.size()]};
-		//		changedHand.resize(3);
-
-		//		int sumOfPayouts = 0;
-		//		int handCount = 0;
-		//		DC_CombinationsPayoutSum(remainingCards, changedHand, 2, sumOfPayouts, handCount);
-
-		//		float expectedValue = float(sumOfPayouts) / float(handCount);
-		//		expectedReturns.push_back(DiscardAndReturn({ droppedCard1, droppedCard2 }, expectedValue));
-		//	}
-		//}
-
-		//// Draw 3
-		//{
-		//	vector<Card> emptyHand(3);
-		//	int sumOfPayouts = 0;
-		//	int handCount = 0;
-		//	DC_CombinationsPayoutSum(remainingCards, emptyHand, 3, sumOfPayouts, handCount);
-
-		//	float expectedValue = float(sumOfPayouts) / float(handCount);
-		//	expectedReturns.push_back(DiscardAndReturn(heldCards, expectedValue));
-		//}		
-
-		//return expectedReturns;
-	}
-	vector<vector<Card>> getHoldsAndTableOfDraws(vector<Card>& heldCards)
-	{
-		_handStatsTable.resetTable();
-		vector<vector<Card>> discardedCards;
-		// Draw 0
-		auto hand = checkHand(heldCards);
-		discardedCards.push_back(vector<Card>());
-		_handStatsTable.addData(hand, 0);
-
-		// Get cards in deck minus the ones that are held
-		auto remainingCards = _deck;
-		for (auto& heldCard : heldCards)
-			remainingCards.erase(std::find(remainingCards.begin(), remainingCards.end(), heldCard));
-
-		// Draw 1
-		{
-			Card droppedCard;
-			for (size_t i = 0; i < heldCards.size(); i++)
-			{
-				droppedCard = heldCards[i];
-				auto changedHand = heldCards;
-				changedHand.erase(std::find(changedHand.begin(), changedHand.end(), droppedCard));
-
-				int sumOfPayouts = 0;
-
-				for (size_t j = 0; j < remainingCards.size(); j++)
-				{
-					// Check for removed cards
-					if (remainingCards[j] == droppedCard)
-						continue;
-
-					changedHand.push_back(remainingCards[j]);
-					auto hand = checkHand(heldCards);
-					sumOfPayouts += getHandPayout(hand);
-					_handStatsTable.addData(hand, 1 + i);
-					changedHand.pop_back();
-				}
-
-				discardedCards.push_back(vector<Card>({ droppedCard }));
-			}
-		}
-
-		// Draw 2
-		{
-			Card droppedCard1;
-			Card droppedCard2;
-			for (size_t i = 0; i < heldCards.size(); i++)
-			{
-				droppedCard1 = heldCards[i];
-				droppedCard2 = heldCards[(i + 1) % heldCards.size()];
-
-				vector<Card> changedHand = { heldCards[(i + 2) % heldCards.size()] };
-				changedHand.resize(3);
-
-				int sumOfPayouts = 0;
-				int handCount = 0;
-				DC_CombinationsPayoutSum(remainingCards, changedHand, 2, sumOfPayouts, handCount, _handStatsTable.getColumn(4 + i));
-
-				float expectedValue = float(sumOfPayouts) / float(handCount);
-				discardedCards.push_back(vector<Card>({ droppedCard1, droppedCard2 }));
-			}
-		}
-
-		// Draw 3
-		{
-			vector<Card> emptyHand(3);
-			int sumOfPayouts = 0;
-			int handCount = 0;
-			DC_CombinationsPayoutSum(remainingCards, emptyHand, 3, sumOfPayouts, handCount, _handStatsTable.getColumn(7));
-
-			float expectedValue = float(sumOfPayouts) / float(handCount);
-			discardedCards.push_back(vector<Card>(heldCards));
-		}
-
-		_handStatsTable.finalizeData();
-		return discardedCards;
-	}
-	float getOptimalExpectedValueOfDraws(vector<Card>& heldCards, bool storeLast4InterestingHands = false)
-	{
-		auto results = getExpectedValuesOfDrawsNoTable(heldCards);
-		float expectedReturn = 0.0f;
-
-		int bestIndex = 0;
-		for (size_t i = 0; i < results.size(); i++)
-		{
-			if (results[i]._expectedReturn > expectedReturn)
-			{
-				expectedReturn = results[i]._expectedReturn;
-				bestIndex = i;
-			}
-		}
-
-		// Finds and stores 4 interesting hands
-		if (storeLast4InterestingHands)
-			pickBestAndWorsts(results, bestIndex, heldCards);
-
-		return expectedReturn;
-	}
-
-	// The following functions are for finding interesting hands
-	void pickBestAndWorsts(vector<DiscardAndReturn>& results, int bestIndex, vector<Card>& heldCards)
-	{
-		// Best single card drop
-		if (bestIndex > 0 && bestIndex < 4)
-		{
-			if (_amongTheBestSingleCardDropHands._expectedReturn < results[bestIndex]._expectedReturn)
-			{
-				cout << "New best single card drop!\n";
-				_amongTheBestSingleCardDropHands = DiscardAndReturn(heldCards, results[bestIndex]._expectedReturn);
-			}
-		}
-		// Best double card drop
-		if (bestIndex > 3 && bestIndex < 7)
-		{
-			if (_amongTheBestDoubleCardDropHands._expectedReturn < results[bestIndex]._expectedReturn)
-			{
-				cout << "New best double card drop!\n";
-				_amongTheBestDoubleCardDropHands = DiscardAndReturn(heldCards, results[bestIndex]._expectedReturn);
-			}
-		}
-		// Best and worst high card hands
-		if (_amongTheWorstHands._expectedReturn > results[bestIndex]._expectedReturn)
-		{
-			cout << "New worst hand!\n";
-			_amongTheWorstHands = DiscardAndReturn(heldCards, results[bestIndex]._expectedReturn);
-		}
-		if (checkHand(heldCards) == Hand::High_Card)
-		{
-			if (_amongTheBestHighCardHands._expectedReturn < results[bestIndex]._expectedReturn)
-			{
-				cout << "New best high card hand!\n";
-				_amongTheBestHighCardHands = DiscardAndReturn(heldCards, results[bestIndex]._expectedReturn);
-			}
-		}
-	}
-	void findAndPrintTheLastForInterestingHandsInCopyableCode()
+	// The following function is for finding interesting hands
+	void findAndPrintTheLast4InterestingHandsInCopyableCode()
 	{
 		cout << "Finding last 4 interesting 3 card poker hands...\n";
 
@@ -748,16 +392,13 @@ public:
 		_amongTheWorstHands._expectedReturn = getHandPayout(static_cast<Hand>(0));
 
 		generateCardCombinations();
-		generateStatisticsWithDraws(true);
+		generateStatistics(true, true);
 
 		auto codePrintout = [](DiscardAndReturn& interestingHand) {
 			cout << "auto cards = vector<Card>();\n";
 			for (auto& card : interestingHand._discardedCards)
-			{
 				cout << "cards.push_back({ Suit::" << getSuitAsString(card._suit, false) << ", Rank::_" << getRankAsString(card._rank) << " });\n";
-			}
-			cout << "hands.push_back(cards);\n";
-			cout << "cout << \"Expected Return of: $" << interestingHand._expectedReturn << "\" << endl;\n" << endl;
+			cout << "expectedReturnsPrintout(cards);\n";
 			};
 
 		codePrintout(_amongTheBestSingleCardDropHands);
@@ -765,7 +406,121 @@ public:
 		codePrintout(_amongTheBestHighCardHands);
 		codePrintout(_amongTheWorstHands);
 	}
-	
+	void tenInterestingHands()
+	{
+		int handNum = 1;
+		// Print out the hand with expected returns in order of greatest to least
+		auto expectedReturnsPrintout = [&](std::vector<Card>& cards)
+			{
+				cout << "Hand " << handNum << ": ";
+				printCards(cards);
+				cout << "Discarded cards      Expected return" << endl;
+				cout << "------------------------------------" << endl;
+
+				vector<DiscardAndReturn> discardsAndReturns;
+				auto discards = getDiscardsAndTableOfDraws(cards);
+				for (size_t j = 0; j < discards.size(); j++)
+				{
+					float expectedReturn = 0.0f;
+					for (auto& stat : _handStatsTable.getColumn(j))
+						expectedReturn += stat._expectedPayout;
+					discardsAndReturns.push_back(DiscardAndReturn(discards[j], expectedReturn));
+				}
+
+				std::sort(discardsAndReturns.begin(), discardsAndReturns.end(),
+					[](const DiscardAndReturn& a, const DiscardAndReturn& b) {
+						return a._expectedReturn > b._expectedReturn;
+					});
+
+				for (auto& result : discardsAndReturns)
+					result.printData();
+				std::cout << endl << endl;
+
+				handNum++;
+			};
+
+		// Hand 1: AKQ all diamonds { D_A D_K D_Q } One of 4 best hands. Hold it
+		{
+			auto cards = vector<Card>();
+			cards.push_back({ Suit::Diamonds, Rank::_Ace });
+			cards.push_back({ Suit::Diamonds, Rank::_King });
+			cards.push_back({ Suit::Diamonds, Rank::_Queen });
+			expectedReturnsPrintout(cards);
+		}
+		// Hand 2: { D_A S_2 C_4 } Going for straight by dropping either Ace or 4
+		{
+			auto cards = vector<Card>();
+			cards.push_back({ Suit::Diamonds, Rank::_Ace });
+			cards.push_back({ Suit::Spades, Rank::_2 });
+			cards.push_back({ Suit::Clubs, Rank::_4});
+			expectedReturnsPrintout(cards);
+		}
+		// Hand 3: { D_A S_3 C_4 } Going for straight
+		{
+			auto cards = vector<Card>();
+			cards.push_back({ Suit::Diamonds, Rank::_Ace });
+			cards.push_back({ Suit::Spades, Rank::_3 });
+			cards.push_back({ Suit::Clubs, Rank::_4 });
+			expectedReturnsPrintout(cards);
+		}
+		// Hand 4: { D_K S_3 D_A } Going for straight or flush while hoping for royal flush
+		{
+			auto cards = vector<Card>();
+			cards.push_back({ Suit::Diamonds, Rank::_King });
+			cards.push_back({ Suit::Spades, Rank::_3 });
+			cards.push_back({ Suit::Diamonds, Rank::_Ace });
+			expectedReturnsPrintout(cards);
+		}
+		// Hand 5: { D_2 S_8 C_J } Bad hand, going for anything else
+		{
+			auto cards = vector<Card>();
+			cards.push_back({ Suit::Diamonds, Rank::_2 });
+			cards.push_back({ Suit::Spades, Rank::_8 });
+			cards.push_back({ Suit::Clubs, Rank::_Jack });
+			expectedReturnsPrintout(cards);
+		}
+		// Hand 6: { H_7 H_2 H_4 } Hold for $5, or drop D_7 for $4 exactly
+		{
+			auto cards = vector<Card>();
+			cards.push_back({ Suit::Hearts, Rank::_7 });
+			cards.push_back({ Suit::Hearts, Rank::_2 });
+			cards.push_back({ Suit::Hearts, Rank::_4 });
+			expectedReturnsPrintout(cards);
+		}
+		// Hand 7: One of the best single card drop hand and is also among the best high card hands
+		{
+			auto cards = vector<Card>();
+			cards.push_back({ Suit::Clubs, Rank::_2 });
+			cards.push_back({ Suit::Spades, Rank::_Queen });
+			cards.push_back({ Suit::Spades, Rank::_King });
+			expectedReturnsPrintout(cards);
+		}
+		// Hand 8: One of the best double card drop hand
+		{
+			auto cards = vector<Card>();
+			cards.push_back({ Suit::Clubs, Rank::_Ace });
+			cards.push_back({ Suit::Clubs, Rank::_2 });
+			cards.push_back({ Suit::Clubs, Rank::_Queen });
+			expectedReturnsPrintout(cards);
+		}
+		// Hand 9: The expected return for any choice is above $1
+		{
+			auto cards = vector<Card>();
+			cards.push_back({ Suit::Clubs, Rank::_Ace });
+			cards.push_back({ Suit::Diamonds, Rank::_King });
+			cards.push_back({ Suit::Hearts, Rank::_Queen });
+			expectedReturnsPrintout(cards);
+		}
+		// Hand 10: Among the worst hands
+		{
+			auto cards = vector<Card>();
+			cards.push_back({ Suit::Clubs, Rank::_2 });
+			cards.push_back({ Suit::Clubs, Rank::_5 });
+			cards.push_back({ Suit::Spades, Rank::_King });
+			expectedReturnsPrintout(cards);
+		}
+	}
+
 	// Utility functions ####################
 
 	static int getHandPayout(Hand hand)
@@ -923,122 +678,9 @@ public:
 			os << out.str();
 	}
 
-	void tenInterestingHands()
-	{
-		auto hands = std::vector<std::vector<Card>>();
-
-		// Hand 1: AKQ all diamonds { D_A D_K D_Q } One of 4 best hands. Hold it
-		{
-			auto cards = vector<Card>();
-			cards.push_back({ Suit::Diamonds, Rank::_Ace });
-			cards.push_back({ Suit::Diamonds, Rank::_King });
-			cards.push_back({ Suit::Diamonds, Rank::_Queen });
-			hands.push_back(cards);
-		}
-		// Hand 2: { D_A S_2 C_4 } Going for straight by dropping either Ace or 4
-		{
-			auto cards = vector<Card>();
-			cards.push_back({ Suit::Diamonds, Rank::_Ace });
-			cards.push_back({ Suit::Spades, Rank::_2 });
-			cards.push_back({ Suit::Clubs, Rank::_4});
-			hands.push_back(cards);
-		}
-		// Hand 3: { D_A S_3 C_4 } Going for straight
-		{
-			auto cards = vector<Card>();
-			cards.push_back({ Suit::Diamonds, Rank::_Ace });
-			cards.push_back({ Suit::Spades, Rank::_3 });
-			cards.push_back({ Suit::Clubs, Rank::_4 });
-			hands.push_back(cards);
-		}
-		// Hand 4: { D_K S_3 D_A } Going for straight or flush while hoping for royal flush
-		{
-			auto cards = vector<Card>();
-			cards.push_back({ Suit::Diamonds, Rank::_King });
-			cards.push_back({ Suit::Spades, Rank::_3 });
-			cards.push_back({ Suit::Diamonds, Rank::_Ace });
-			hands.push_back(cards);
-		}
-		// Hand 5: { D_2 S_8 C_J } Bad hand, going for anything else
-		{
-			auto cards = vector<Card>();
-			cards.push_back({ Suit::Diamonds, Rank::_2 });
-			cards.push_back({ Suit::Spades, Rank::_8 });
-			cards.push_back({ Suit::Clubs, Rank::_Jack });
-			hands.push_back(cards);
-		}
-		// Hand 6: { H_7 H_2 H_4 } Hold for $5, or drop D_7 for $4 exactly
-		{
-			auto cards = vector<Card>();
-			cards.push_back({ Suit::Hearts, Rank::_7 });
-			cards.push_back({ Suit::Hearts, Rank::_2 });
-			cards.push_back({ Suit::Hearts, Rank::_4 });
-			hands.push_back(cards);
-		}
-		// Hand 7: The best single card drop hand and is also among the best high card hands
-		{
-			auto cards = vector<Card>();
-			cards.push_back({ Suit::Clubs, Rank::_2 });
-			cards.push_back({ Suit::Spades, Rank::_Queen });
-			cards.push_back({ Suit::Spades, Rank::_King });
-			hands.push_back(cards);
-			//cout << "Expected Return of: $10.0204" << endl;
-		}
-		// Hand 8: One of the best double card drop hand
-		{
-			auto cards = vector<Card>();
-			cards.push_back({ Suit::Clubs, Rank::_2 });
-			cards.push_back({ Suit::Clubs, Rank::_5 });
-			cards.push_back({ Suit::Spades, Rank::_Queen });
-			hands.push_back(cards);
-			//cout << "Expected Return of: $1.47449" << endl;
-		}
-		// Hand 9: 
-		{
-
-		}
-		// Hand 10: Among the worst hands
-		{
-			auto cards = vector<Card>();
-			cards.push_back({ Suit::Clubs, Rank::_2 });
-			cards.push_back({ Suit::Clubs, Rank::_5 });
-			cards.push_back({ Suit::Spades, Rank::_King });
-			hands.push_back(cards);
-			cout << "Expected Return of: $1.30017" << endl;
-		}
-
-		// Print out the hands with expected returns in order of greatest to least
-		for (size_t i = 5; i < hands.size(); i++)
-		{
-			cout << "Hand " << i + 1 << ": ";
-			printCards(hands[i]);
-
-			auto results = getExpectedValuesOfDrawsNoTable(hands[i]);
-			std::sort(results.begin(), results.end(),
-				[](const DiscardAndReturn& a, const DiscardAndReturn& b) {
-					return a._expectedReturn > b._expectedReturn;
-				});
-
-			cout << endl;
-			for (auto& result : results)
-				result.printData();
-			std::cout << endl << endl;
-		}
-	}
-
 	// Testing
 	void runTests()
 	{
-		// Deprecation testing
-		/*generateCardCombinations();
-		for (auto& hand : _allCardCombinations)
-		{
-			if (isStraight(hand) != isStraightDeprecated(hand))
-				printCards(hand);
-		}*/
-
-
-
 		int testsFailed = 0;
 		testsFailed += testRoyalFlush();
 		testsFailed += testThreeAces();
@@ -1052,10 +694,254 @@ public:
 		else
 			cout << "All tests passed" << endl;
 
-		//debugPrintExpectedValuesOfDraws();
+		debugPrintExpectedValuesOfDraws();
 	}
 
 private:
+	void generateCardCombinations(int handSize = 3)
+	{
+		if (handSize < 1 || handSize > 52)
+		{
+			cout << "Invalid input for generateCardCombinations(). Input must be between 1 and 52 inclusive. Given input was " << handSize << endl;
+			return;
+		}
+
+		_allCardCombinations = runDC_Combinations(handSize);
+	}
+	void generateStatistics(bool withDraws, bool storeInterestingHands = false)
+	{
+		setupStatistics(_statistics);
+
+		cout << "Generating statistics...";
+		if (withDraws == false)
+		{
+			// Check all hands and get frequencies
+			for (auto& hand : _allCardCombinations)
+				_statistics[static_cast<int>(checkHand(hand))]._frequency++;
+		}
+		else
+		{
+			size_t incrementOfInform = 1; // Percent increment dispayed while running
+			size_t countPerIncrementOfInform = _allCardCombinations.size() / (100 / incrementOfInform);
+			size_t currentPercent = 0;
+			cout << "Count per percent: " << countPerIncrementOfInform << endl;
+
+			// Check all hands and add expected values
+			for (size_t i = 0; i < _allCardCombinations.size(); i++)
+			{
+				// Display percent progress
+				if (i > countPerIncrementOfInform * currentPercent)
+				{
+					cout << incrementOfInform * currentPercent << "% ";
+					currentPercent++;
+				}
+
+				auto columnAndReturn = getOptimalExpectedValueOfDraws(_allCardCombinations[i], storeInterestingHands);
+				_handStatsTable.addColumnToColumn(columnAndReturn.first, _statistics);
+			}
+			cout << "100%" << endl;
+		}
+		cout << "Complete" << endl;
+
+
+		// #######################################
+		// Finalize statistics
+		// #######################################
+
+		auto computeStat = [&](Hand hand, string description) {
+			Stat& statRef = _statistics[static_cast<int>(hand)];
+			statRef._description = description;
+
+			if (withDraws == false)
+			{
+				statRef._probability = float(statRef._frequency) / float(_allCardCombinations.size());
+				statRef._expectedPayout = float(statRef._payout) * statRef._probability;
+			}
+			else
+				statRef._expectedPayout /= float(_allCardCombinations.size());
+			};
+
+		computeStat(Hand::Royal_FLush, "AKQ (in any suit)");
+		computeStat(Hand::Straight_Flush, "3 suited in sequence");
+		computeStat(Hand::Three_Aces, "3 Aces (any combo of suits)");
+		computeStat(Hand::Three_of_a_Kind, "3 of the same rank");
+		computeStat(Hand::Straight, "3 in sequence (includes AKQ)");
+		computeStat(Hand::Flush, "3 suited");
+		computeStat(Hand::Pair, "2 of the same rank");
+		computeStat(Hand::High_Card, "None of the above");
+	}
+	void printTable(vector<Stat>& statistics, bool includeProbabilityAndFrequency = true)
+	{
+		std::ostringstream out;
+
+		// Categories
+		out << left << setw(16) << "Hand";
+		out << left << setw(30) << "Description";
+		if (includeProbabilityAndFrequency)
+		{
+			out << left << setw(7) << "Freq";
+			out << left << setw(13) << "Probability";
+		}
+		out << left << setw(8) << "Payout";
+		out << left << setw(9) << "Return";
+		out << endl;
+
+		int tableBorderSize = 83;
+		if (includeProbabilityAndFrequency == false)
+			tableBorderSize = 83 - 20;
+
+		// Border
+		out << setw(tableBorderSize) << std::setfill('-') << "-" << endl;
+
+		float totalReturnInDollars = 0.0f;
+		for (auto& stat : statistics)
+		{
+			out << stat.getFormatted(includeProbabilityAndFrequency);
+			totalReturnInDollars += stat._expectedPayout;
+		}
+
+		// Border
+		out << setw(tableBorderSize) << std::setfill('-') << "-" << endl;
+
+		// Return
+		out << std::setfill(' ');
+		out << std::right << setw(tableBorderSize - 9) << "Total Return: ";
+		out << left << setw(7) << Stat::formatMoney(totalReturnInDollars);
+
+		// Print to console
+		cout << out.str();
+	}
+
+	static void setupStatistics(vector<Stat>& stats)
+	{
+		// Clear and set
+		stats = vector<Stat>(static_cast<int>(Hand::EmptyHand));
+
+		for (size_t i = 0; i < stats.size(); i++)
+		{
+			stats[i]._hand = static_cast<Hand>(i);
+			stats[i]._frequency = 0;
+			stats[i]._payout = getHandPayout(static_cast<Hand>(i));
+		}
+	}
+	// Returns discarded cards for each hold/draw
+	vector<vector<Card>> getDiscardsAndTableOfDraws(vector<Card>& heldCards)
+	{
+		_handStatsTable.resetTable();
+		vector<vector<Card>> discardedCards;
+		// Draw 0
+		auto hand = checkHand(heldCards);
+		discardedCards.push_back(vector<Card>());
+		_handStatsTable.addData(hand, 0);
+
+		// Get cards in deck minus the ones that are held
+		auto remainingCards = _deck;
+		for (auto& heldCard : heldCards)
+			remainingCards.erase(std::find(remainingCards.begin(), remainingCards.end(), heldCard));
+
+		// Draw 1
+		{
+			Card droppedCard;
+			vector<Card> changedHand;
+			for (size_t i = 0; i < heldCards.size(); i++)
+			{
+				droppedCard = heldCards[i];
+				changedHand = heldCards;
+				changedHand.erase(std::find(changedHand.begin(), changedHand.end(), droppedCard));
+
+				for (size_t j = 0; j < remainingCards.size(); j++)
+				{
+					// Check for removed cards
+					if (remainingCards[j] == droppedCard)
+						continue;
+
+					changedHand.push_back(remainingCards[j]);
+					_handStatsTable.addData(checkHand(changedHand), 1 + i);
+					changedHand.pop_back();
+				}
+				discardedCards.push_back(vector<Card>({ droppedCard }));
+			}
+		}
+
+		// Draw 2
+		{
+			Card droppedCard1;
+			Card droppedCard2;
+			for (size_t i = 0; i < heldCards.size(); i++)
+			{
+				droppedCard1 = heldCards[i];
+				droppedCard2 = heldCards[(i + 1) % heldCards.size()];
+
+				vector<Card> changedHand = { heldCards[(i + 2) % heldCards.size()] };
+				changedHand.resize(3);
+
+				DC_CombinationsPayoutSumAndTable(remainingCards, changedHand, 2, _handStatsTable.getColumn(4 + i));
+				discardedCards.push_back(vector<Card>({ droppedCard1, droppedCard2 }));
+			}
+		}
+
+		// Draw 3
+		{
+			vector<Card> emptyHand(3);
+			DC_CombinationsPayoutSumAndTable(remainingCards, emptyHand, 3, _handStatsTable.getColumn(7));
+			discardedCards.push_back(vector<Card>(heldCards));
+		}
+
+		_handStatsTable.finalizeData();
+		return discardedCards;
+	}
+	// Returns the column and expected return of the column of the handStatsTable
+	std::pair<int, float> getOptimalExpectedValueOfDraws(vector<Card>& heldCards, bool storeLast4InterestingHands = false)
+	{
+		// HandStatsTable is reset at the start of the following function
+		auto discards = getDiscardsAndTableOfDraws(heldCards);
+		auto columnAndReturn = _handStatsTable.getBestHoldColumnAndExpectedReturn();
+
+		// Finds and stores 4 interesting hands
+		if (storeLast4InterestingHands)
+			pickBestAndWorsts(heldCards, columnAndReturn.second, columnAndReturn.first);
+		return columnAndReturn;
+	}
+
+
+	// The following function is for finding interesting hands
+	void pickBestAndWorsts(vector<Card>& heldCards, float expectedReturn, int cardsDropped)
+	{
+		// Best single card drop
+		if (cardsDropped == 1)
+		{
+			if (_amongTheBestSingleCardDropHands._expectedReturn < expectedReturn)
+			{
+				cout << "New best single card drop!\n";
+				_amongTheBestSingleCardDropHands = DiscardAndReturn(heldCards, expectedReturn);
+			}
+		}
+		// Best double card drop
+		if (cardsDropped == 2)
+		{
+			if (_amongTheBestDoubleCardDropHands._expectedReturn < expectedReturn)
+			{
+				cout << "New best double card drop!\n";
+				_amongTheBestDoubleCardDropHands = DiscardAndReturn(heldCards, expectedReturn);
+			}
+		}
+		// Worst hand
+		if (_amongTheWorstHands._expectedReturn > expectedReturn)
+		{
+			cout << "New worst hand!\n";
+			_amongTheWorstHands = DiscardAndReturn(heldCards, expectedReturn);
+		}
+		// Best high card hand
+		if (checkHand(heldCards) == Hand::High_Card)
+		{
+			if (_amongTheBestHighCardHands._expectedReturn < expectedReturn)
+			{
+				cout << "New best high card hand!\n";
+				_amongTheBestHighCardHands = DiscardAndReturn(heldCards, expectedReturn);
+			}
+		}
+	}
+
 	int testRoyalFlush()
 	{
 		int testsFailed = 0;
@@ -1594,9 +1480,16 @@ private:
 		testCards.push_back({ Suit::Spades, Rank::_Ace });
 		testCards.push_back({ Suit::Clubs, Rank::_Queen });
 				
-		auto results = getExpectedValuesOfDraws(testCards);
-		for (auto& result : results)
-			result.printData();
+		auto discards = getDiscardsAndTableOfDraws(testCards);
+		for (size_t i = 0; i < discards.size(); i++)
+		{
+			printCards(discards[i], false, 20);
+			float expectedReturn = 0.0f;
+			for (auto& stat : _handStatsTable.getColumn(i))
+				expectedReturn += stat._expectedPayout;
+			cout << " E[x]: " << expectedReturn << endl;
+		}
+		_handStatsTable.printExpectedValuePerColumn();
 	}
 
 	// Uses DC_Combinations to generate all combinations of cards as hands of size handSize
@@ -1621,20 +1514,15 @@ private:
 				possibleHands.push_back(vector<Card>(currentHand));
 		}
 	}
-	static void DC_CombinationsPayoutSum(vector<Card>& deck, vector<Card>& currentHand, int handSize, int& payoutSum, int& handCount, vector<Stat>& stats, int x = 0)
+	static void DC_CombinationsPayoutSumAndTable(vector<Card>& deck, vector<Card>& currentHand, int handSize, vector<Stat>& stats, int x = 0)
 	{
 		for (size_t i = x; i < deck.size() - handSize + 1; i++)
 		{
 			currentHand[currentHand.size() - handSize] = deck[i];
 			if (handSize > 1)
-				DC_CombinationsPayoutSum(deck, currentHand, handSize - 1, payoutSum, handCount, stats, i + 1);
+				DC_CombinationsPayoutSumAndTable(deck, currentHand, handSize - 1, stats, i + 1);
 			else
-			{
-				auto hand = checkHand(currentHand);
-				payoutSum += getHandPayout(hand);
-				stats[static_cast<int>(hand)]._frequency++;
-				handCount++;
-			}
+				stats[static_cast<int>(checkHand(currentHand))]._frequency++;
 		}
 	}
 
@@ -1656,26 +1544,17 @@ int main()
 {
 	PokerProbability pokerP;
 
-	bool runTests = true;
-	bool perfectGame = false;
+	bool runTests = false;
+	bool perfectGame = true;
 
 	if (runTests)
 	{
-		//pokerP.runTests();
-		pokerP.tenInterestingHands();
-		//pokerP.findAndPrintTheLastForInterestingHandsInCopyableCode();
+		pokerP.runTests();
+		//pokerP.tenInterestingHands();
+		//pokerP.findAndPrintTheLast4InterestingHandsInCopyableCode();
 	}
 	else
-	{
-		pokerP.generateCardCombinations();
-
-		if (perfectGame)
-			pokerP.generateStatisticsWithDraws();
-		else
-			pokerP.generateStatisticsNoDraws();
-
-		pokerP.printTable(!perfectGame);
-	}
+		pokerP.printStatistcs(perfectGame);
 
 	return 0;
 }
